@@ -33,8 +33,14 @@ CREDS = ServiceAccountCredentials.from_json_keyfile_dict(
 )
 
 client = gspread.authorize(CREDS)
-spreadsheet = client.open("nyatet-db")
-sheet = spreadsheet.worksheet("Data")
+# spreadsheet = client.open("nyatet-db")
+# sheet = spreadsheet.worksheet("Data")
+
+SPREADSHEET_ID = "1AAq3K-qWbRow8Sh0r3PDuqPiIFG4AoIRJ4fJp4v6vgQ"
+
+spreadsheet = client.open_by_key(SPREADSHEET_ID)
+sheet = spreadsheet.get_worksheet(0)  # sheet pertama
+
 
 # ================== UTIL FUNCTION ==================
 
@@ -238,4 +244,5 @@ app.add_handler(CommandHandler("bulanini", bulanini))
 app.add_handler(CommandHandler("grafik", grafik))
 
 app.run_polling()
+
 
