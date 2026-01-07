@@ -23,26 +23,43 @@ CREDS = ServiceAccountCredentials.from_json_keyfile_dict(
     creds_json, SCOPE)
 
 client = gspread.authorize(CREDS)
-sheet = client.open("nyatet-db").sheet1
+sheet = client.open("nyatet-db").Data
 
 # === HANDLER PESAN ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     try:
-        keterangan, jumlah = text.rsplit(" ", 1)
-        jumlah = int(jumlah)
+        jumlah = parse_jumlah(text)
+        if jumlah is None:
+            raise ValueError("Jumlah tidak ditemukan")
+
+        # hapus angka dari keterangan
+        keterangan = re.sub(r'\d+(\s*(k|rb|ribu|jt|juta))?', '', text, flags=re.IGNORECASE).strip()
 
         tanggal = datetime.now().strftime("%Y-%m-%d")
         tipe = "Pengeluaran"
+        bulan = datetime.now().strftime("%Y-%m")
 
-        sheet.append_row([tanggal, keterangan, jumlah, tipe])
+        row = [tanggal, keterangan, jumlah, tipe, bulan]
 
-        await update.message.reply_text("✅ Pengeluaran berhasil dicatat")
-    except:
+        sheet.append_row(row, value_input_option="USER_ENTERED")
+
         await update.message.reply_text(
-            "❌ Format salah\nContoh:\nMakan siang 25000"
+            f"✅ Dicatat\n📝 {keterangan}\n💸 Rp{jumlah:,}"
         )
+
+    except Exception as e:
+        await update.message.reply_text(
+            "❌ Format tidak dikenali\n"
+            "Contoh:\n"
+            "• makan siang 25k\n"
+            "• beli kopi 18rb\n"
+            "• gaji 5jt"
+        )
+        print("ERROR:", e)
+
+
 
 async def bulanini(update, context):
     bulan = datetime.now().strftime("%Y-%m")
@@ -80,11 +97,25 @@ async def hariini(update, context):
     )
 
 
+# === FUNCTION ===
 
-def parse_jumlah(text):
-    text = text.lower().replace("ribu","000").replace("k","000")
-    angka = re.findall(r'\d+', text)
-    return int(angka[-1]) if angka else None
+def parse_jumlah(text: str) -> int | None:
+    text = text.lower().replace(".", "").replace(",", "")
+
+    # pola: 25k, 25rb, 25 ribu, 2jt, 2 juta
+    patterns = [
+        (r'(\d+)\s*(k|rb|ribu)', 1_000),
+        (r'(\d+)\s*(jt|juta)', 1_000_000),
+        (r'(\d+)', 1)
+    ]
+
+    for pattern, multiplier in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return int(match.group(1)) * multiplier
+
+    return None
+
 
 # === MAIN ===
 
@@ -94,4 +125,5 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CommandHandler("bulanini", bulanini))
 
 app.run_polling()
+
 
