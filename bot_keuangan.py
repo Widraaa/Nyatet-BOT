@@ -156,32 +156,158 @@ async def grafik(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     df = pd.DataFrame(data)
+
+    # Pastikan tipe data benar
     df["Jumlah"] = pd.to_numeric(df["Jumlah"], errors="coerce")
     df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors="coerce")
 
     bulan_ini = datetime.now().strftime("%Y-%m")
     df = df[df["Tanggal"].dt.strftime("%Y-%m") == bulan_ini]
 
-
     if df.empty:
         await update.message.reply_text("❌ Tidak ada data bulan ini")
         return
 
-    rekap = df.groupby("Tipe")["Jumlah"].sum()
+    pemasukan = df[df["Tipe"] == "Pemasukan"]["Jumlah"].sum()
+    pengeluaran = df[df["Tipe"] == "Pengeluaran"]["Jumlah"].sum()
+
+    if pemasukan == 0 and pengeluaran == 0:
+        await update.message.reply_text("❌ Data kosong")
+        return
+
+    # ===== PIE CHART =====
+    labels = []
+    values = []
+
+    if pemasukan > 0:
+        labels.append("Pemasukan")
+        values.append(pemasukan)
+
+    if pengeluaran > 0:
+        labels.append("Pengeluaran")
+        values.append(pengeluaran)
 
     with tempfile.NamedTemporaryFile(suffix=".png") as f:
-        plt.figure()
-        rekap.plot(kind="bar")
+        plt.figure(figsize=(6, 6))
+        plt.pie(
+            values,
+            labels=labels,
+            autopct="%1.1f%%",
+            startangle=90
+        )
         plt.title(f"Rekap Keuangan {bulan_ini}")
-        plt.ylabel("Rupiah")
         plt.tight_layout()
         plt.savefig(f.name)
         plt.close()
 
+        caption = (
+            f"📊 *Rekap Keuangan {bulan_ini}*\n\n"
+            f"💰 Pemasukan: Rp{int(pemasukan):,}\n"
+            f"💸 Pengeluaran: Rp{int(pengeluaran):,}\n"
+            f"📊 Selisih: Rp{int(pemasukan - pengeluaran):,}"
+        )
+
         await update.message.reply_photo(
             photo=open(f.name, "rb"),
-            caption=f"📊 Grafik Keuangan {bulan_ini}",
+            caption=caption,
+            parse_mode="Markdown"
         )
+
+# ================== GRAFIK BULANAN =============
+async def grafik_pengeluaran(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = sheet.get_all_records()
+    if not data:
+        await update.message.reply_text("❌ Belum ada data")
+        return
+
+    df = pd.DataFrame(data)
+
+    # Rapihkan data
+    df["Jumlah"] = pd.to_numeric(df["Jumlah"], errors="coerce")
+    df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors="coerce")
+    df["Keterangan"] = df["Keterangan"].str.capitalize()
+
+    bulan_ini = datetime.now().strftime("%Y-%m")
+
+    df = df[
+        (df["Tanggal"].dt.strftime("%Y-%m") == bulan_ini)
+        & (df["Tipe"] == "Pengeluaran")
+    ]
+
+    if df.empty:
+        await update.message.reply_text("❌ Tidak ada pengeluaran bulan ini")
+        return
+
+    # Group by kategori
+    rekap = df.groupby("Keterangan")["Jumlah"].sum().sort_values(ascending=False)
+
+    # Batasi top 6 kategori
+    if len(rekap) > 6:
+        top = rekap[:6]
+        lainnya = rekap[6:].sum()
+        rekap = top
+        rekap["Lainnya"] = lainnya
+
+    total = rekap.sum()
+
+    with tempfile.NamedTemporaryFile(suffix=".png") as f:
+        plt.figure(figsize=(7, 7))
+        plt.pie(
+            rekap,
+            labels=rekap.index,
+            autopct=lambda p: f"{p:.1f}%\nRp{int(p*total/100):,}",
+            startangle=90
+        )
+        plt.title(f"Pengeluaran per Kategori ({bulan_ini})")
+        plt.tight_layout()
+        plt.savefig(f.name)
+        plt.close()
+
+        caption = (
+            f"🥧 *Pengeluaran per Kategori ({bulan_ini})*\n\n"
+            f"💸 Total: Rp{int(total):,}\n\n"
+            f"📌 Top kategori:\n"
+        )
+
+        for k, v in rekap.items():
+            caption += f"• {k}: Rp{int(v):,}\n"
+
+        await update.message.reply_photo(
+            photo=open(f.name, "rb"),
+            caption=caption,
+            parse_mode="Markdown"
+        )
+# ================== DELETE BEFORE ============
+async def hapus_terakhir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        # Ambil semua isi sheet
+        values = sheet.get_all_values()
+
+        if len(values) <= 1:
+            await update.message.reply_text("❌ Tidak ada data untuk dihapus")
+            return
+
+        # Ambil baris terakhir
+        last_row_index = len(values)
+        last_row = values[-1]
+
+        tanggal, keterangan, jumlah, tipe, bulan = last_row
+
+        # Hapus baris terakhir
+        sheet.delete_rows(last_row_index)
+
+        await update.message.reply_text(
+            f"🗑️ *Data terakhir dihapus*\n\n"
+            f"📅 {tanggal}\n"
+            f"📝 {keterangan}\n"
+            f"💸 Rp{int(float(jumlah)):,}\n"
+            f"📌 {tipe}",
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        print("ERROR HAPUS:", e)
+        await update.message.reply_text("❌ Gagal menghapus data")
 
 # ================== MAIN ==================
 
@@ -190,6 +316,8 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CommandHandler("hariini", hari_ini))
 app.add_handler(CommandHandler("bulanini", bulanini))
 app.add_handler(CommandHandler("grafik", grafik))
+app.add_handler(CommandHandler("grafikpengeluaran", grafik_pengeluaran))
+app.add_handler(CommandHandler("hapus_terakhir", hapus_terakhir))
 
 app.run_polling()
 
