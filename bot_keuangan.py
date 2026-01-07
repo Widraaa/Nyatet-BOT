@@ -278,29 +278,32 @@ async def grafik_pengeluaran(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode="Markdown"
         )
 # ================== DELETE BEFORE ============
+def clean_number(value: str) -> int:
+    return int(float(value.replace(",", "")))
+
+
 async def hapus_terakhir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        # Ambil semua isi sheet
         values = sheet.get_all_values()
 
         if len(values) <= 1:
             await update.message.reply_text("❌ Tidak ada data untuk dihapus")
             return
 
-        # Ambil baris terakhir
         last_row_index = len(values)
         last_row = values[-1]
 
         tanggal, keterangan, jumlah, tipe, bulan = last_row
 
-        # Hapus baris terakhir
+        jumlah_int = clean_number(jumlah)
+
         sheet.delete_rows(last_row_index)
 
         await update.message.reply_text(
             f"🗑️ *Data terakhir dihapus*\n\n"
             f"📅 {tanggal}\n"
             f"📝 {keterangan}\n"
-            f"💸 Rp{int(float(jumlah)):,}\n"
+            f"💸 Rp{jumlah_int:,}\n"
             f"📌 {tipe}",
             parse_mode="Markdown"
         )
@@ -308,6 +311,44 @@ async def hapus_terakhir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("ERROR HAPUS:", e)
         await update.message.reply_text("❌ Gagal menghapus data")
+
+#=================== SALDO ================
+async def saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        data = sheet.get_all_records()
+
+        if not data:
+            await update.message.reply_text("❌ Belum ada data keuangan")
+            return
+
+        total_pemasukan = 0
+        total_pengeluaran = 0
+
+        for d in data:
+            try:
+                jumlah = clean_number(d["Jumlah"])
+            except:
+                continue
+
+            if d["Tipe"] == "Pemasukan":
+                total_pemasukan += jumlah
+            elif d["Tipe"] == "Pengeluaran":
+                total_pengeluaran += jumlah
+
+        saldo_akhir = total_pemasukan - total_pengeluaran
+
+        await update.message.reply_text(
+            f"💼 *Saldo Saat Ini*\n\n"
+            f"💰 Total Pemasukan: Rp{total_pemasukan:,}\n"
+            f"💸 Total Pengeluaran: Rp{total_pengeluaran:,}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"📊 *Saldo Akhir: Rp{saldo_akhir:,}*",
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        print("ERROR SALDO:", e)
+        await update.message.reply_text("❌ Gagal menghitung saldo")
 
 # ================== MAIN ==================
 
@@ -318,6 +359,8 @@ app.add_handler(CommandHandler("bulanini", bulanini))
 app.add_handler(CommandHandler("grafik", grafik))
 app.add_handler(CommandHandler("grafikpengeluaran", grafik_pengeluaran))
 app.add_handler(CommandHandler("hapus_terakhir", hapus_terakhir))
+app.add_handler(CommandHandler("saldo", saldo))
 
 app.run_polling()
+
 
