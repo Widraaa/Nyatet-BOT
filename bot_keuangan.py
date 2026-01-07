@@ -80,6 +80,8 @@ def deteksi_tipe(text: str) -> str:
     return "Pengeluaran"
 
 # ================== MESSAGE HANDLER ==================
+print("ISI SHEET:", sheet.get_all_values())
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     print("TEXT MASUK:", text)
@@ -244,5 +246,6 @@ app.add_handler(CommandHandler("bulanini", bulanini))
 app.add_handler(CommandHandler("grafik", grafik))
 
 app.run_polling()
+
 
 
