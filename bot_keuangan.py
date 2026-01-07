@@ -17,32 +17,23 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tempfile
 
-# ================== TELEGRAM TOKEN ==================
+# ================== CONFIG ==================
+
 TOKEN = os.getenv("BOT_TOKEN")
 
-# ================== GOOGLE SHEET ==================
 SCOPE = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive",
 ]
 
 creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-
-CREDS = ServiceAccountCredentials.from_json_keyfile_dict(
-    creds_json, SCOPE
-)
-
+CREDS = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, SCOPE)
 client = gspread.authorize(CREDS)
-# spreadsheet = client.open("nyatet-db")
-# sheet = spreadsheet.worksheet("Data")
 
 SPREADSHEET_ID = "1AAq3K-qWbRow8Sh0r3PDuqPiIFG4AoIRJ4fJp4v6vgQ"
+sheet = client.open_by_key(SPREADSHEET_ID).get_worksheet(0)
 
-spreadsheet = client.open_by_key(SPREADSHEET_ID)
-sheet = spreadsheet.get_worksheet(0)  # sheet pertama
-
-
-# ================== UTIL FUNCTION ==================
+# ================== UTIL ==================
 
 def parse_jumlah(text: str) -> int | None:
     text = text.lower().replace(".", "").replace(",", "")
@@ -57,103 +48,57 @@ def parse_jumlah(text: str) -> int | None:
         match = re.search(pattern, text)
         if match:
             return int(match.group(1)) * multiplier
-
     return None
 
 
 PEMASUKAN_KEYWORDS = [
-    "gaji",
-    "bonus",
-    "thr",
-    "fee",
-    "komisi",
-    "transfer masuk",
-    "refund",
+    "gaji", "bonus", "thr", "fee", "komisi", "refund"
 ]
 
 
 def deteksi_tipe(text: str) -> str:
     text = text.lower()
-    for k in PEMASUKAN_KEYWORDS:
-        if k in text:
-            return "Pemasukan"
-    return "Pengeluaran"
+    return "Pemasukan" if any(k in text for k in PEMASUKAN_KEYWORDS) else "Pengeluaran"
 
 # ================== MESSAGE HANDLER ==================
-print("ISI SHEET:", sheet.get_all_values())
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    print("TEXT MASUK:", text)
+    print("TEXT:", text)
 
-    try:
-        jumlah = parse_jumlah(text)
-        print("JUMLAH:", jumlah)
+    jumlah = parse_jumlah(text)
+    if jumlah is None:
+        await update.message.reply_text(
+            "❌ Format tidak dikenali\n\n"
+            "Contoh:\n"
+            "• kopi 5k\n"
+            "• makan 25rb\n"
+            "• gaji 5jt"
+        )
+        return
 
-        keterangan = re.sub(
-            r"\d+(\s*(k|rb|ribu|jt|juta))?",
-            "",
-            text,
-            flags=re.IGNORECASE,
-        ).strip()
+    keterangan = re.sub(
+        r"\d+(\s*(k|rb|ribu|jt|juta))?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
 
-        tanggal = datetime.now().strftime("%Y-%m-%d")
-        bulan = datetime.now().strftime("%Y-%m")
-        tipe = deteksi_tipe(text)
+    tanggal = datetime.now().strftime("%Y-%m-%d")
+    bulan = datetime.now().strftime("%Y-%m")
+    tipe = deteksi_tipe(text)
 
-        row = [tanggal, keterangan, jumlah, tipe, bulan]
-        print("ROW SIAP:", row)
+    row = [tanggal, keterangan.capitalize(), jumlah, tipe, bulan]
+    sheet.append_row(row, value_input_option="USER_ENTERED")
 
-        sheet.append_row(row, value_input_option="USER_ENTERED")
-        print("APPEND_ROW DIJALANKAN")
+    await update.message.reply_text(
+        f"✅ Dicatat\n"
+        f"📝 {keterangan}\n"
+        f"💸 Rp{jumlah:,}\n"
+        f"📌 {tipe}"
+    )
 
-        await update.message.reply_text("✅ Dicoba simpan ke Google Sheet")
-
-    except Exception as e:
-        print("ERROR SIMPAN:", e)
-        await update.message.reply_text("❌ Gagal simpan")
-
-# async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     text = update.message.text
-
-#     try:
-#         jumlah = parse_jumlah(text)
-#         if jumlah is None:
-#             raise ValueError("Jumlah tidak ditemukan")
-
-#         keterangan = re.sub(
-#             r"\d+(\s*(k|rb|ribu|jt|juta))?",
-#             "",
-#             text,
-#             flags=re.IGNORECASE,
-#         ).strip()
-
-#         tanggal = datetime.now().strftime("%Y-%m-%d")
-#         bulan = datetime.now().strftime("%Y-%m")
-#         tipe = deteksi_tipe(text)
-
-#         row = [tanggal, keterangan, jumlah, tipe, bulan]
-#         sheet.append_row(row, value_input_option="USER_ENTERED")
-
-#         await update.message.reply_text(
-#             f"✅ *Dicatat*\n"
-#             f"📝 {keterangan}\n"
-#             f"💸 Rp{jumlah:,}\n"
-#             f"📌 {tipe}",
-#             parse_mode="Markdown",
-#         )
-
-#     except Exception as e:
-#         await update.message.reply_text(
-#             "❌ Format tidak dikenali\n\n"
-#             "Contoh:\n"
-#             "• makan siang 25k\n"
-#             "• beli kopi 18rb\n"
-#             "• gaji 5jt"
-#         )
-#         print("ERROR:", e)
-
-# ================== COMMAND /hariini ==================
+# ================== /hariini ==================
 
 async def hari_ini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now().strftime("%Y-%m-%d")
@@ -170,15 +115,14 @@ async def hari_ini(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     total = sum(int(d["Jumlah"]) for d in pengeluaran)
 
-    pesan = f"📅 *Pengeluaran Hari Ini ({today})*\n\n"
+    pesan = f"📅 Pengeluaran Hari Ini ({today})\n\n"
     for d in pengeluaran:
         pesan += f"• {d['Keterangan']} — Rp{int(d['Jumlah']):,}\n"
 
-    pesan += f"\n💸 *Total:* Rp{total:,}"
+    pesan += f"\n💸 Total: Rp{total:,}"
+    await update.message.reply_text(pesan)
 
-    await update.message.reply_text(pesan, parse_mode="Markdown")
-
-# ================== COMMAND /bulanini ==================
+# ================== /bulanini ==================
 
 async def bulanini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bulan = datetime.now().strftime("%Y-%m")
@@ -197,14 +141,13 @@ async def bulanini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     saldo = pemasukan - pengeluaran
 
     await update.message.reply_text(
-        f"📆 *Rekap Bulan Ini ({bulan})*\n\n"
+        f"📆 Rekap Bulan Ini ({bulan})\n\n"
         f"💰 Pemasukan: Rp{pemasukan:,}\n"
         f"💸 Pengeluaran: Rp{pengeluaran:,}\n"
-        f"📊 Saldo: Rp{saldo:,}",
-        parse_mode="Markdown",
+        f"📊 Saldo: Rp{saldo:,}"
     )
 
-# ================== COMMAND /grafik ==================
+# ================== /grafik ==================
 
 async def grafik(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = sheet.get_all_records()
@@ -213,6 +156,7 @@ async def grafik(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     df = pd.DataFrame(data)
+    df["Jumlah"] = pd.to_numeric(df["Jumlah"], errors="coerce")
     bulan_ini = datetime.now().strftime("%Y-%m")
     df = df[df["Bulan"] == bulan_ini]
 
@@ -225,7 +169,7 @@ async def grafik(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with tempfile.NamedTemporaryFile(suffix=".png") as f:
         plt.figure()
         rekap.plot(kind="bar")
-        plt.title(f"Pemasukan vs Pengeluaran ({bulan_ini})")
+        plt.title(f"Rekap Keuangan {bulan_ini}")
         plt.ylabel("Rupiah")
         plt.tight_layout()
         plt.savefig(f.name)
@@ -239,13 +183,9 @@ async def grafik(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================== MAIN ==================
 
 app = ApplicationBuilder().token(TOKEN).build()
-
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CommandHandler("hariini", hari_ini))
 app.add_handler(CommandHandler("bulanini", bulanini))
 app.add_handler(CommandHandler("grafik", grafik))
 
 app.run_polling()
-
-
-
