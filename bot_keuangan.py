@@ -74,14 +74,13 @@ def deteksi_tipe(text: str) -> str:
     return "Pengeluaran"
 
 # ================== MESSAGE HANDLER ==================
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    print("TEXT MASUK:", text)
 
     try:
         jumlah = parse_jumlah(text)
-        if jumlah is None:
-            raise ValueError("Jumlah tidak ditemukan")
+        print("JUMLAH:", jumlah)
 
         keterangan = re.sub(
             r"\d+(\s*(k|rb|ribu|jt|juta))?",
@@ -95,25 +94,56 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tipe = deteksi_tipe(text)
 
         row = [tanggal, keterangan, jumlah, tipe, bulan]
-        sheet.append_row(row, value_input_option="USER_ENTERED")
+        print("ROW SIAP:", row)
 
-        await update.message.reply_text(
-            f"✅ *Dicatat*\n"
-            f"📝 {keterangan}\n"
-            f"💸 Rp{jumlah:,}\n"
-            f"📌 {tipe}",
-            parse_mode="Markdown",
-        )
+        sheet.append_row(row, value_input_option="USER_ENTERED")
+        print("APPEND_ROW DIJALANKAN")
+
+        await update.message.reply_text("✅ Dicoba simpan ke Google Sheet")
 
     except Exception as e:
-        await update.message.reply_text(
-            "❌ Format tidak dikenali\n\n"
-            "Contoh:\n"
-            "• makan siang 25k\n"
-            "• beli kopi 18rb\n"
-            "• gaji 5jt"
-        )
-        print("ERROR:", e)
+        print("ERROR SIMPAN:", e)
+        await update.message.reply_text("❌ Gagal simpan")
+
+# async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     text = update.message.text
+
+#     try:
+#         jumlah = parse_jumlah(text)
+#         if jumlah is None:
+#             raise ValueError("Jumlah tidak ditemukan")
+
+#         keterangan = re.sub(
+#             r"\d+(\s*(k|rb|ribu|jt|juta))?",
+#             "",
+#             text,
+#             flags=re.IGNORECASE,
+#         ).strip()
+
+#         tanggal = datetime.now().strftime("%Y-%m-%d")
+#         bulan = datetime.now().strftime("%Y-%m")
+#         tipe = deteksi_tipe(text)
+
+#         row = [tanggal, keterangan, jumlah, tipe, bulan]
+#         sheet.append_row(row, value_input_option="USER_ENTERED")
+
+#         await update.message.reply_text(
+#             f"✅ *Dicatat*\n"
+#             f"📝 {keterangan}\n"
+#             f"💸 Rp{jumlah:,}\n"
+#             f"📌 {tipe}",
+#             parse_mode="Markdown",
+#         )
+
+#     except Exception as e:
+#         await update.message.reply_text(
+#             "❌ Format tidak dikenali\n\n"
+#             "Contoh:\n"
+#             "• makan siang 25k\n"
+#             "• beli kopi 18rb\n"
+#             "• gaji 5jt"
+#         )
+#         print("ERROR:", e)
 
 # ================== COMMAND /hariini ==================
 
@@ -208,3 +238,4 @@ app.add_handler(CommandHandler("bulanini", bulanini))
 app.add_handler(CommandHandler("grafik", grafik))
 
 app.run_polling()
+
