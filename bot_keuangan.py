@@ -87,6 +87,11 @@ def parse_jumlah(text):
     return int(angka[-1]) if angka else None
 
 # === MAIN ===
+
 app = ApplicationBuilder().token(TOKEN).build()
+
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(CommandHandler("bulanini", bulanini))
+
 app.run_polling()
+
