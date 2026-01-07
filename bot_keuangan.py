@@ -157,8 +157,11 @@ async def grafik(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     df = pd.DataFrame(data)
     df["Jumlah"] = pd.to_numeric(df["Jumlah"], errors="coerce")
+    df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors="coerce")
+
     bulan_ini = datetime.now().strftime("%Y-%m")
-    df = df[df["Bulan"] == bulan_ini]
+    df = df[df["Tanggal"].dt.strftime("%Y-%m") == bulan_ini]
+
 
     if df.empty:
         await update.message.reply_text("❌ Tidak ada data bulan ini")
@@ -189,3 +192,4 @@ app.add_handler(CommandHandler("bulanini", bulanini))
 app.add_handler(CommandHandler("grafik", grafik))
 
 app.run_polling()
+
