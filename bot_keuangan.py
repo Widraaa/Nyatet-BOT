@@ -23,7 +23,8 @@ CREDS = ServiceAccountCredentials.from_json_keyfile_dict(
     creds_json, SCOPE)
 
 client = gspread.authorize(CREDS)
-sheet = client.open("nyatet-db").Data
+spreadsheet = client.open("nyatet-db")
+sheet = spreadsheet.worksheet("Data")
 
 # === HANDLER PESAN ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,5 +126,6 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CommandHandler("bulanini", bulanini))
 
 app.run_polling()
+
 
 
