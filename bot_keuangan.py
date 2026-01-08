@@ -15,21 +15,21 @@ from telegram.ext import (
     filters
 )
 
-# ===================== CONFIG =====================
+# ================== CONFIG ==================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-SHEET_NAME = os.getenv("SHEET_NAME")
+TOKEN = os.getenv("BOT_TOKEN")
 
-creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-
-scope = [
+SCOPE = [
     "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/drive",
 ]
 
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
-gc = gspread.authorize(creds)
-sheet = gc.open(SHEET_NAME).sheet1
+creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+CREDS = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, SCOPE)
+client = gspread.authorize(CREDS)
+
+SPREADSHEET_ID = "1AAq3K-qWbRow8Sh0r3PDuqPiIFG4AoIRJ4fJp4v6vgQ"
+sheet = client.open_by_key(SPREADSHEET_ID).get_worksheet(0)
 
 LAST_DELETED_ROW = None
 
@@ -247,3 +247,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
