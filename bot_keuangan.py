@@ -315,24 +315,26 @@ async def hapus_terakhir(update: Update, context: ContextTypes.DEFAULT_TYPE):
 #=================== SALDO ================
 async def saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        data = sheet.get_all_records()
+        rows = sheet.get_all_values()
 
-        if not data:
-            await update.message.reply_text("❌ Belum ada data keuangan")
+        if len(rows) <= 1:
+            await update.message.reply_text("❌ Belum ada data")
             return
 
         total_pemasukan = 0
         total_pengeluaran = 0
 
-        for d in data:
+        # Skip header (row 0)
+        for row in rows[1:]:
             try:
-                jumlah = clean_number(d["Jumlah"])
+                jumlah = clean_number(row[2])  # kolom Jumlah
+                tipe = row[3].strip()          # kolom Tipe
             except:
                 continue
 
-            if d["Tipe"] == "Pemasukan":
+            if tipe == "Pemasukan":
                 total_pemasukan += jumlah
-            elif d["Tipe"] == "Pengeluaran":
+            elif tipe == "Pengeluaran":
                 total_pengeluaran += jumlah
 
         saldo_akhir = total_pemasukan - total_pengeluaran
@@ -350,6 +352,7 @@ async def saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("ERROR SALDO:", e)
         await update.message.reply_text("❌ Gagal menghitung saldo")
 
+
 # ================== MAIN ==================
 
 app = ApplicationBuilder().token(TOKEN).build()
@@ -362,5 +365,6 @@ app.add_handler(CommandHandler("hapus_terakhir", hapus_terakhir))
 app.add_handler(CommandHandler("saldo", saldo))
 
 app.run_polling()
+
 
 
