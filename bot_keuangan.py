@@ -1,76 +1,101 @@
-import os
-import json
-import re
-from datetime import datetime
-
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
-    CommandHandler,
     MessageHandler,
+    CommandHandler,
     ContextTypes,
-    filters
+    filters,
 )
 
-# ===================== CONFIG =====================
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+import re
+import os
+import json
+import pandas as pd
+import matplotlib.pyplot as plt
+import tempfile
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-
-creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-
-scope = [
+# ================== CONFIG ==================
+TOKEN = os.getenv("BOT_TOKEN")
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")  # WAJIB
+SCOPE = [
     "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/drive",
 ]
 
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+# ================== GOOGLE SHEET ==================
+creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, SCOPE)
 gc = gspread.authorize(creds)
+
 spreadsheet = gc.open_by_key(SPREADSHEET_ID)
-sheet = spreadsheet.sheet1
+sheet = spreadsheet.sheet1  # sheet pertama
 
-LAST_DELETED_ROW = None
-print("SHEET TERBUKA:", spreadsheet.title)
+# ================== GLOBAL ==================
+last_deleted_row = None
 
-# ===================== HELPER =====================
+# ================== UTIL ==================
+def clean_number(val):
+    if val is None:
+        return 0
+    if isinstance(val, (int, float)):
+        return int(val)
+    return int(float(str(val).replace(",", "")))
 
-def clean_number(value):
-    if isinstance(value, (int, float)):
-        return int(value)
+def parse_jumlah(text: str):
+    text = text.lower().replace(".", "").replace(",", "")
+    patterns = [
+        (r"(\d+)\s*(k|rb|ribu)", 1_000),
+        (r"(\d+)\s*(jt|juta)", 1_000_000),
+        (r"(\d+)", 1),
+    ]
+    for p, m in patterns:
+        match = re.search(p, text)
+        if match:
+            return int(match.group(1)) * m
+    return None
 
-    value = str(value)
-    value = value.replace(",", "")
-    value = re.sub(r"[^\d]", "", value)
+PEMASUKAN_KEYWORDS = ["gaji", "bonus", "thr", "fee", "komisi", "refund"]
 
-    return int(value) if value else 0
+def deteksi_tipe(text):
+    text = text.lower()
+    for k in PEMASUKAN_KEYWORDS:
+        if k in text:
+            return "Pemasukan"
+    return "Pengeluaran"
 
+# ================== TEXT HANDLER ==================
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
 
-def parse_jumlah(text):
-    text = text.lower().replace(" ", "")
+    jumlah = parse_jumlah(text)
+    if jumlah is None:
+        await update.message.reply_text("❌ Jumlah tidak ditemukan")
+        return
 
-    match = re.search(r"(\d+(?:\.\d+)?)(k|ribu)?", text)
-    if not match:
-        return None
+    keterangan = re.sub(
+        r"\d+(\s*(k|rb|ribu|jt|juta))?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip().capitalize()
 
-    angka = float(match.group(1))
-    satuan = match.group(2)
+    tanggal = datetime.now().strftime("%Y-%m-%d")
+    bulan = datetime.now().strftime("%Y-%m")
+    tipe = deteksi_tipe(text)
 
-    if satuan in ["k", "ribu"]:
-        angka *= 1000
+    row = [tanggal, keterangan, jumlah, tipe, bulan]
+    sheet.append_row(row, value_input_option="USER_ENTERED")
 
-    return int(angka)
-
-
-def bulan_sekarang():
-    return datetime.now().strftime("%Y-%m")
-
-
-def tanggal_hari_ini():
-    return datetime.now().strftime("%Y-%m-%d")
-
+    await update.message.reply_text(
+        f"✅ *Dicatat*\n"
+        f"📝 {keterangan}\n"
+        f"💸 Rp{jumlah:,}\n"
+        f"📌 {tipe}",
+        parse_mode="Markdown",
+    )
 # ===================== COMMAND =====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -80,174 +105,161 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• kopi 2k\n"
         "• gaji 5 juta\n\n"
         "Perintah:\n"
+        "/hariini\n"
         "/bulanini\n"
         "/saldo\n"
+        "/grafik\n"
         "/hapus_terakhir\n"
         "/undo_hapus",
         parse_mode="Markdown"
     )
 
+# ================== /hariini ==================
+async def hariini(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = sheet.get_all_records()
 
-async def bulan_ini(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    bulan = bulan_sekarang()
-    rows = sheet.get_all_values()[1:]
+    items = [
+        d for d in data
+        if d["Tanggal"] == today and d["Tipe"] == "Pengeluaran"
+    ]
 
-    pemasukan = pengeluaran = 0
+    if not items:
+        await update.message.reply_text("✅ Tidak ada pengeluaran hari ini")
+        return
 
-    for r in rows:
-        if len(r) < 5:
-            continue
-        if r[4] == bulan:
-            jumlah = clean_number(r[2])
-            if r[3] == "Pemasukan":
-                pemasukan += jumlah
-            elif r[3] == "Pengeluaran":
-                pengeluaran += jumlah
+    total = sum(clean_number(d["Jumlah"]) for d in items)
+    msg = f"📅 *Pengeluaran Hari Ini ({today})*\n\n"
+    for d in items:
+        msg += f"• {d['Keterangan']} — Rp{clean_number(d['Jumlah']):,}\n"
+    msg += f"\n💸 *Total:* Rp{total:,}"
 
-    await update.message.reply_text(
-        f"📅 *Bulan Ini ({bulan})*\n\n"
-        f"💰 Pemasukan: Rp{pemasukan:,}\n"
-        f"💸 Pengeluaran: Rp{pengeluaran:,}",
-        parse_mode="Markdown"
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+# ================== /bulanini ==================
+async def bulanini(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bulan = datetime.now().strftime("%Y-%m")
+    data = sheet.get_all_records()
+
+    pemasukan = sum(
+        clean_number(d["Jumlah"])
+        for d in data
+        if d["Bulan"] == bulan and d["Tipe"] == "Pemasukan"
     )
 
+    pengeluaran = sum(
+        clean_number(d["Jumlah"])
+        for d in data
+        if d["Bulan"] == bulan and d["Tipe"] == "Pengeluaran"
+    )
 
+    saldo = pemasukan - pengeluaran
+
+    await update.message.reply_text(
+        f"📆 *Rekap Bulan Ini ({bulan})*\n\n"
+        f"💰 Pemasukan: Rp{pemasukan:,}\n"
+        f"💸 Pengeluaran: Rp{pengeluaran:,}\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"📊 *Saldo:* Rp{saldo:,}",
+        parse_mode="Markdown",
+    )
+
+# ================== /saldo ==================
 async def saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rows = sheet.get_all_values()[1:]
+    data = sheet.get_all_records()
 
-    pemasukan = pengeluaran = 0
-
-    for r in rows:
-        if len(r) < 4:
-            continue
-
-        jumlah = clean_number(r[2])
-
-        if r[3] == "Pemasukan":
-            pemasukan += jumlah
-        elif r[3] == "Pengeluaran":
-            pengeluaran += jumlah
-
-    saldo_akhir = pemasukan - pengeluaran
+    pemasukan = sum(
+        clean_number(d["Jumlah"])
+        for d in data if d["Tipe"] == "Pemasukan"
+    )
+    pengeluaran = sum(
+        clean_number(d["Jumlah"])
+        for d in data if d["Tipe"] == "Pengeluaran"
+    )
 
     await update.message.reply_text(
         f"💼 *Saldo Saat Ini*\n\n"
         f"💰 Total Pemasukan: Rp{pemasukan:,}\n"
         f"💸 Total Pengeluaran: Rp{pengeluaran:,}\n"
         f"━━━━━━━━━━━━━━\n"
-        f"📊 Saldo Akhir: Rp{saldo_akhir:,}",
-        parse_mode="Markdown"
+        f"📊 *Saldo Akhir:* Rp{pemasukan - pengeluaran:,}",
+        parse_mode="Markdown",
     )
 
+# ================== /grafik ==================
+async def grafik(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = sheet.get_all_records()
+    bulan = datetime.now().strftime("%Y-%m")
 
-async def hapus_terakhir(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global LAST_DELETED_ROW
+    pemasukan = sum(
+        clean_number(d["Jumlah"])
+        for d in data if d["Bulan"] == bulan and d["Tipe"] == "Pemasukan"
+    )
+    pengeluaran = sum(
+        clean_number(d["Jumlah"])
+        for d in data if d["Bulan"] == bulan and d["Tipe"] == "Pengeluaran"
+    )
 
-    try:
-        values = sheet.get_all_values()
+    if pemasukan == 0 and pengeluaran == 0:
+        await update.message.reply_text("❌ Tidak ada data bulan ini")
+        return
 
-        if len(values) <= 1:
-            await update.message.reply_text("❌ Tidak ada data untuk dihapus")
-            return
+    labels = ["Pemasukan", "Pengeluaran"]
+    values = [pemasukan, pengeluaran]
 
-        LAST_DELETED_ROW = values[-1]
-        sheet.delete_rows(len(values))
+    with tempfile.NamedTemporaryFile(suffix=".png") as f:
+        plt.figure()
+        plt.pie(values, labels=labels, autopct="%1.1f%%", startangle=90)
+        plt.title(f"Keuangan {bulan}")
+        plt.tight_layout()
+        plt.savefig(f.name)
+        plt.close()
 
-        jumlah = clean_number(LAST_DELETED_ROW[2])
-
-        await update.message.reply_text(
-            f"🗑️ *Data terakhir dihapus*\n\n"
-            f"📝 {LAST_DELETED_ROW[1]}\n"
-            f"💸 Rp{jumlah:,}\n\n"
-            f"↩️ /undo_hapus untuk membatalkan",
-            parse_mode="Markdown"
+        await update.message.reply_photo(
+            photo=open(f.name, "rb"),
+            caption=(
+                f"📊 *Rekap {bulan}*\n\n"
+                f"💰 Pemasukan: Rp{pemasukan:,}\n"
+                f"💸 Pengeluaran: Rp{pengeluaran:,}"
+            ),
+            parse_mode="Markdown",
         )
 
-    except Exception as e:
-        print("ERROR HAPUS:", e)
-        await update.message.reply_text("❌ Gagal menghapus data")
+# ================== /hapus ==================
+async def hapus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global last_deleted_row
+    values = sheet.get_all_values()
+    if len(values) <= 1:
+        await update.message.reply_text("❌ Tidak ada data")
+        return
 
+    last_deleted_row = values[-1]
+    sheet.delete_rows(len(values))
+    await update.message.reply_text("🗑️ Data terakhir dihapus")
 
+# ================== /undo_hapus ==================
 async def undo_hapus(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global LAST_DELETED_ROW
-
-    if not LAST_DELETED_ROW:
-        await update.message.reply_text("❌ Tidak ada data yang bisa di-undo")
+    global last_deleted_row
+    if not last_deleted_row:
+        await update.message.reply_text("❌ Tidak ada data untuk dikembalikan")
         return
 
-    try:
-        sheet.append_row(
-            LAST_DELETED_ROW,
-            value_input_option="USER_ENTERED"
-        )
+    sheet.append_row(last_deleted_row, value_input_option="USER_ENTERED")
+    last_deleted_row = None
+    await update.message.reply_text("♻️ Data berhasil dikembalikan")
 
-        jumlah = clean_number(LAST_DELETED_ROW[2])
-        LAST_DELETED_ROW = None
+# ================== MAIN ==================
+app = ApplicationBuilder().token(TOKEN).build()
 
-        await update.message.reply_text(
-            f"↩️ *Undo berhasil*\n\n"
-            f"📝 Data dikembalikan\n"
-            f"💸 Rp{jumlah:,}",
-            parse_mode="Markdown"
-        )
+# COMMANDS DULU
+app.add_handler(CommandHandler("hariini", hariini))
+app.add_handler(CommandHandler("bulanini", bulanini))
+app.add_handler(CommandHandler("saldo", saldo))
+app.add_handler(CommandHandler("grafik", grafik))
+app.add_handler(CommandHandler("hapus", hapus))
+app.add_handler(CommandHandler("undo_hapus", undo_hapus))
 
-    except Exception as e:
-        print("ERROR UNDO:", e)
-        await update.message.reply_text("❌ Gagal undo")
+# TEXT TERAKHIR
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-
-# ===================== MESSAGE HANDLER =====================
-
-async def catat_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    jumlah = parse_jumlah(text)
-
-    if not jumlah:
-        return
-
-    keterangan = re.sub(r"\d.*", "", text).strip().title()
-    tipe = "Pemasukan" if "gaji" in text.lower() or "bonus" in text.lower() else "Pengeluaran"
-
-    row = [
-        tanggal_hari_ini(),
-        keterangan,
-        jumlah,
-        tipe,
-        bulan_sekarang()
-    ]
-
-    try:
-        sheet.append_row(row, value_input_option="USER_ENTERED")
-        await update.message.reply_text(
-            f"✅ *Tercatat*\n\n"
-            f"📝 {keterangan}\n"
-            f"💸 Rp{jumlah:,}\n"
-            f"📌 {tipe}",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        print("ERROR SIMPAN:", e)
-        await update.message.reply_text("❌ Gagal menyimpan data")
-
-
-# ===================== MAIN =====================
-
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("hariini", hari_ini))
-    app.add_handler(CommandHandler("bulanini", bulanini))
-    app.add_handler(CommandHandler("grafik", grafik))
-    app.add_handler(CommandHandler("saldo", saldo))
-    app.add_handler(CommandHandler("hapus", hapus))
-    app.add_handler(CommandHandler("undo_hapus", undo_hapus))
-
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, catat_text))
-
-    print("🤖 Bot keuangan berjalan...")
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
-
+app.run_polling()
