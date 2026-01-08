@@ -235,10 +235,11 @@ async def catat_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("bulanini", bulan_ini))
+    app.add_handler(CommandHandler("hariini", hari_ini))
+    app.add_handler(CommandHandler("bulanini", bulanini))
+    app.add_handler(CommandHandler("grafik", grafik))
     app.add_handler(CommandHandler("saldo", saldo))
-    app.add_handler(CommandHandler("hapus_terakhir", hapus_terakhir))
+    app.add_handler(CommandHandler("hapus", hapus))
     app.add_handler(CommandHandler("undo_hapus", undo_hapus))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, catat_text))
@@ -249,3 +250,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
